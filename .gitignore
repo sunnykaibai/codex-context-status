@@ -1,0 +1,9 @@
+.DS_Store
+*.log
+*.jsonl
+*.asar
+*.asar.*
+*.app/
+node_modules/
+screenshots/
+tmp/
