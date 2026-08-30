@@ -16,7 +16,7 @@
 - `last_token_usage.total_tokens`：当前活动上下文的 token 数量
 - `model_context_window`：本次运行实际报告的上下文上限
 - 上下文占用百分比
-- 主要额度窗口的剩余百分比和重置时间
+- 通过 ChatGPT 已认证的 `/wham/usage` 客户端取得主要额度窗口的剩余百分比和重置时间
 
 工具不会把累计的 `total_token_usage` 错当成当前上下文占用。
 
@@ -57,9 +57,9 @@ ChatGPT 完全退出后，应通过安装生成的启动器重新打开。若本
 ## 工作机制
 
 1. 启动器让官方 ChatGPT 使用仅绑定 `127.0.0.1:17654` 的 Chromium DevTools Protocol。
-2. 用户级 `launchd` 服务读取最近更新的 Codex rollout 文件。
-3. 服务从 `token_count` 事件提取当前上下文、窗口上限和额度。
-4. 服务通过本地 CDP 连接渲染进程。
+2. 用户级 `launchd` 服务从最近更新的 Codex rollout 文件读取当前上下文和运行时窗口上限。
+3. 服务通过 CDP 在运行时发现 ChatGPT 已认证的 API 客户端，每 30 秒请求一次 `/wham/usage`。只有百分比、窗口长度和重置时间会离开渲染进程。
+4. 实时请求暂时失败时，服务回退到 rollout 中最后一条 `rate_limits` 快照。
 5. 服务在权限控件 `[data-composer-navigation-target="permissions"]` 后插入状态节点；React 重绘后会自动恢复。
 
 项目不会修改 `ChatGPT.app`，不会上传会话内容，也不包含从 OpenAI 应用中解包的代码。
@@ -67,6 +67,8 @@ ChatGPT 完全退出后，应通过安装生成的启动器重新打开。若本
 ## 安全边界
 
 CDP 具有读取和修改渲染页面的能力。同一 macOS 用户下的其他进程也能访问没有认证的本地调试端口。项目把端口限制在回环地址，但不能为 CDP 增加认证。
+
+额度请求复用 ChatGPT 自己的认证客户端，凭据不会返回给后台进程；后台只收到百分比、窗口长度和重置时间。
 
 不要在不可信的共享 macOS 账号中使用。安装前请阅读 [SECURITY.md](SECURITY.md)。
 

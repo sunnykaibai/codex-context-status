@@ -18,7 +18,7 @@ The status is a real child of the composer toolbar DOM. It is not a floating mac
 - Active conversation tokens from `last_token_usage.total_tokens`
 - The runtime-reported `model_context_window`
 - Context occupancy percentage
-- Remaining primary usage limit and reset time
+- Remaining primary usage limit and reset time from ChatGPT's authenticated `/wham/usage` client
 
 The utility deliberately does not use cumulative `total_token_usage` as the current context size.
 
@@ -59,9 +59,9 @@ The uninstaller removes the injected node, stops the background service, and mov
 ## How it works
 
 1. The launcher starts the official ChatGPT app with Chromium DevTools Protocol bound to `127.0.0.1:17654`.
-2. A user-level `launchd` service reads the newest local Codex rollout file.
-3. The service extracts `token_count.info.last_token_usage`, `model_context_window`, and `rate_limits`.
-4. The service connects to the local renderer through CDP.
+2. A user-level `launchd` service reads the newest local Codex rollout file for active context tokens and the runtime context window.
+3. Through CDP, the service discovers ChatGPT's authenticated API client at runtime and requests `/wham/usage` every 30 seconds. Only percentage, window length, and reset time leave the renderer.
+4. If the live request is temporarily unavailable, the service falls back to the last `rate_limits` snapshot in the rollout.
 5. It inserts a status node immediately after `[data-composer-navigation-target="permissions"]` and restores it after React rerenders.
 
 The project does not modify `ChatGPT.app`, upload session contents, or include extracted OpenAI application code.
@@ -69,6 +69,8 @@ The project does not modify `ChatGPT.app`, upload session contents, or include e
 ## Security model
 
 Remote debugging is powerful: another process running as your macOS user can inspect or modify the ChatGPT renderer while the port is open. This project reduces exposure by binding the endpoint to loopback only, but CDP does not provide authentication.
+
+The live usage request reuses ChatGPT's authenticated client. Credentials stay inside the renderer; the background process receives only percentage, window length, and reset time.
 
 Do not use this project on an untrusted shared macOS account. Read [SECURITY.md](SECURITY.md) before installing.
 

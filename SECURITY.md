@@ -8,7 +8,9 @@ The launcher explicitly binds to loopback. Do not change the debugging address t
 
 ## Local data
 
-The injector reads JSONL events under `~/.codex/sessions`. It extracts token counts, context-window size, and rate-limit fields. It does not need message content, credentials, cookies, or API keys, and it makes no outbound network requests.
+The injector reads JSONL events under `~/.codex/sessions` for token counts and context-window size. For current account limits, it asks ChatGPT's existing authenticated client to request `/wham/usage`. The injected expression returns only `used_percent`, `limit_window_seconds`, `reset_at`, and a fetch timestamp. Credentials and the endpoint's account fields remain inside the renderer.
+
+The project does not need message content, cookies, API keys, email addresses, user IDs, or account IDs.
 
 The diagnostic log contains DOM selector results, element rectangles, and errors. It should not contain conversation text.
 

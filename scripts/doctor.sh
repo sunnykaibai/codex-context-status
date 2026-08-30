@@ -32,6 +32,12 @@ if [[ -f "$log_path" ]]; then
     print "FAIL  embedded composer node"
     failures=$((failures + 1))
   fi
+  if /usr/bin/grep -q '"usageSource":"live"' "$log_path"; then
+    print "PASS  live usage endpoint"
+  else
+    print "FAIL  live usage endpoint"
+    failures=$((failures + 1))
+  fi
 else
   print "FAIL  injector log"
   failures=$((failures + 1))

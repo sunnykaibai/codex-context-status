@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 const DEBUG_HOST = "127.0.0.1";
 const DEBUG_PORT = Number(process.env.CODEX_CONTEXT_STATUS_PORT ?? 17654);
 const POLL_INTERVAL_MS = 1000;
+const LIVE_USAGE_INTERVAL_MS = Math.max(
+  10_000,
+  Number(process.env.CODEX_USAGE_REFRESH_MS ?? 30_000),
+);
 const defaultSessionsRoot = process.env.CODEX_SESSIONS_ROOT
   ?? path.join(os.homedir(), ".codex", "sessions");
 
@@ -13,6 +17,8 @@ let socket = null;
 let nextRequestId = 1;
 let pendingRequests = new Map();
 let lastDiagnostic = "";
+let liveUsage = null;
+let nextLiveUsageRefreshAt = 0;
 
 function dateDirectory(root, date) {
   const year = String(date.getFullYear()).padStart(4, "0");
@@ -125,7 +131,69 @@ export function readStatus(root = defaultSessionsRoot) {
     remainingPercent,
     resetText,
     sourcePath: filePath,
+    usageSource: "rollout",
   };
+}
+
+function formatResetTime(timestampSeconds) {
+  if (!Number.isFinite(timestampSeconds)) return null;
+  const reset = new Date(timestampSeconds * 1000);
+  const month = String(reset.getMonth() + 1).padStart(2, "0");
+  const day = String(reset.getDate()).padStart(2, "0");
+  const hour = String(reset.getHours()).padStart(2, "0");
+  const minute = String(reset.getMinutes()).padStart(2, "0");
+  return `${month}-${day} ${hour}:${minute}`;
+}
+
+export function applyLiveUsage(status, usage) {
+  if (!status || !usage || !Number.isFinite(usage.usedPercent)) return status;
+  const remainingPercent = Math.max(0, Math.min(100, Math.round(100 - usage.usedPercent)));
+  const quotaLabel = Math.abs(usage.windowSeconds - 300 * 60) <= 60
+    ? "5 小时"
+    : Math.abs(usage.windowSeconds - 10_080 * 60) <= 60
+      ? "周额度"
+      : "额度";
+  return {
+    ...status,
+    quotaLabel,
+    remainingPercent,
+    resetText: formatResetTime(usage.resetAt),
+    usageSource: "live",
+    liveUsageFetchedAt: usage.fetchedAt,
+  };
+}
+
+export function liveUsageExpression() {
+  return `(${async function readLiveUsage() {
+    const href = Array.from(document.querySelectorAll('link[rel="modulepreload"]'))
+      .map((element) => element.href)
+      .find((url) => /\/assets\/app-initial-[^/]+\.js$/.test(url));
+    if (!href) return { ok: false, reason: "app-initial-module-not-found" };
+
+    const module = await import(href);
+    const clients = Object.values(module).filter(
+      (value) => value && typeof value.safeGet === "function" && typeof value.safePost === "function",
+    );
+    for (const client of clients) {
+      try {
+        const response = await client.safeGet("/wham/usage", {
+          additionalHeaders: { "OAI-App-Brand": "codex" },
+        });
+        const primary = response?.rate_limit?.primary_window;
+        if (!primary) continue;
+        return {
+          ok: true,
+          usedPercent: Number.isFinite(primary.used_percent) ? primary.used_percent : 0,
+          windowSeconds: primary.limit_window_seconds ?? 0,
+          resetAt: primary.reset_at ?? null,
+          fetchedAt: Date.now(),
+        };
+      } catch {
+        // More than one authenticated API client can be exported. Try the next one.
+      }
+    }
+    return { ok: false, reason: "authenticated-usage-client-not-found" };
+  }.toString()})()`;
 }
 
 export function injectionExpression(status) {
@@ -198,6 +266,8 @@ export function injectionExpression(status) {
     return {
       ok: true,
       rowClass: row.className,
+      usageSource: snapshot.usageSource,
+      remainingPercent: snapshot.remainingPercent,
       statusRect: status.getBoundingClientRect().toJSON(),
       permissionRect: permission.getBoundingClientRect().toJSON(),
     };
@@ -262,9 +332,34 @@ function send(method, params = {}) {
 }
 
 async function injectOnce() {
-  const status = readStatus();
+  let status = readStatus();
   if (!status) return null;
   if (!(await connect())) return null;
+  const now = Date.now();
+  if (now >= nextLiveUsageRefreshAt) {
+    try {
+      const result = await send("Runtime.evaluate", {
+        expression: liveUsageExpression(),
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      const value = result?.result?.value;
+      if (value?.ok === true) {
+        liveUsage = value;
+        nextLiveUsageRefreshAt = now + LIVE_USAGE_INTERVAL_MS;
+      } else {
+        nextLiveUsageRefreshAt = now + 5_000;
+      }
+    } catch {
+      nextLiveUsageRefreshAt = now + 5_000;
+    }
+  }
+  if (
+    liveUsage
+    && now - liveUsage.fetchedAt <= Math.max(120_000, LIVE_USAGE_INTERVAL_MS * 3)
+  ) {
+    status = applyLiveUsage(status, liveUsage);
+  }
   return send("Runtime.evaluate", {
     expression: injectionExpression(status),
     returnByValue: true,
@@ -306,6 +401,23 @@ async function main() {
     const status = readStatus();
     if (!status) process.exitCode = 1;
     else console.log(JSON.stringify(status, null, 2));
+    return;
+  }
+  if (process.argv.includes("--print-live-usage")) {
+    try {
+      if (!(await connect())) {
+        process.exitCode = 1;
+        return;
+      }
+      const result = await send("Runtime.evaluate", {
+        expression: liveUsageExpression(),
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      console.log(JSON.stringify(result?.result?.value ?? null, null, 2));
+    } finally {
+      socket?.close();
+    }
     return;
   }
   if (process.argv.includes("--remove")) {

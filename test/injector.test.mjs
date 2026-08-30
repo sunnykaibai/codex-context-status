@@ -5,8 +5,10 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  applyLiveUsage,
   compactTokens,
   injectionExpression,
+  liveUsageExpression,
   readStatus,
 } from "../src/injector.mjs";
 
@@ -67,4 +69,32 @@ test("targets the permission control and creates an embedded node", () => {
   assert.match(expression, /data-composer-navigation-target/);
   assert.match(expression, /data-codex-context-status/);
   assert.match(expression, /insertBefore/);
+});
+
+test("authoritative live usage overrides a stale rollout quota", () => {
+  const merged = applyLiveUsage(
+    {
+      quotaLabel: "周额度",
+      remainingPercent: 70,
+      resetText: "09-04 00:52",
+      usageSource: "rollout",
+    },
+    {
+      usedPercent: 1,
+      windowSeconds: 604_800,
+      resetAt: 1_788_659_419,
+      fetchedAt: 123,
+    },
+  );
+  assert.equal(merged.remainingPercent, 99);
+  assert.equal(merged.usageSource, "live");
+  assert.equal(merged.liveUsageFetchedAt, 123);
+});
+
+test("discovers the authenticated API client at runtime", () => {
+  const expression = liveUsageExpression();
+  assert.match(expression, /app-initial-/);
+  assert.match(expression, /safeGet/);
+  assert.match(expression, /\/wham\/usage/);
+  assert.doesNotMatch(expression, /AIt/);
 });
