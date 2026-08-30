@@ -13,7 +13,7 @@
 
 ## 显示内容
 
-- `last_token_usage.total_tokens`：当前活动上下文的 token 数量
+- `last_token_usage.total_tokens`：当前选中的本地对话所占用的 token 数量
 - `model_context_window`：本次运行实际报告的上下文上限
 - 上下文占用百分比
 - 通过 ChatGPT 已认证的 `/wham/usage` 客户端取得主要额度窗口的剩余百分比和重置时间
@@ -57,10 +57,11 @@ ChatGPT 完全退出后，应通过安装生成的启动器重新打开。若本
 ## 工作机制
 
 1. 启动器让官方 ChatGPT 使用仅绑定 `127.0.0.1:17654` 的 Chromium DevTools Protocol。
-2. 用户级 `launchd` 服务从最近更新的 Codex rollout 文件读取当前上下文和运行时窗口上限。
-3. 服务通过 CDP 在运行时发现 ChatGPT 已认证的 API 客户端，每 30 秒请求一次 `/wham/usage`。只有百分比、窗口长度和重置时间会离开渲染进程。
-4. 实时请求暂时失败时，服务回退到 rollout 中最后一条 `rate_limits` 快照。
-5. 服务在权限控件 `[data-composer-navigation-target="permissions"]` 后插入状态节点；React 重绘后会自动恢复。
+2. 服务从当前输入框 DOM 读取活动 thread ID，并把它映射到对应的本地 rollout 文件；侧边栏选中项只作为回退。切换对话后不需要发送消息。
+3. 用户级 `launchd` 服务从该 rollout 文件读取当前上下文和运行时窗口上限。
+4. 服务通过 CDP 在运行时发现 ChatGPT 已认证的 API 客户端，每 30 秒请求一次 `/wham/usage`。只有百分比、窗口长度和重置时间会离开渲染进程。
+5. 实时请求暂时失败时，服务回退到 rollout 中最后一条 `rate_limits` 快照。
+6. 服务在权限控件 `[data-composer-navigation-target="permissions"]` 后插入状态节点；React 重绘后会自动恢复。
 
 项目不会修改 `ChatGPT.app`，不会上传会话内容，也不包含从 OpenAI 应用中解包的代码。
 
@@ -74,7 +75,7 @@ CDP 具有读取和修改渲染页面的能力。同一 macOS 用户下的其他
 
 ## 已知限制
 
-- 工具选择最近三个本地日期目录中最后更新的 rollout。后台任务可能短暂成为“最近活动对话”。
+- 无法读取当前选中 thread 的 DOM 标记时，工具才会回退到最近三个本地日期目录中最后更新的 rollout。
 - ChatGPT 更新可能改变输入框选择器。运行 `./scripts/doctor.sh`，若出现 `FAIL embedded composer node`，说明当前版本不再兼容。
 - 当前只显示主要额度窗口。
 - 当前版本只支持 macOS。

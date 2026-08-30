@@ -38,6 +38,18 @@ if [[ -f "$log_path" ]]; then
     print "FAIL  live usage endpoint"
     failures=$((failures + 1))
   fi
+  if /usr/bin/grep -q '"contextSource":"focused-thread"' "$log_path"; then
+    print "PASS  focused thread mapping"
+  else
+    print "FAIL  focused thread mapping"
+    failures=$((failures + 1))
+  fi
+  if /usr/bin/grep -q '"threadSelectionSource":"composer"' "$log_path"; then
+    print "PASS  composer thread identity"
+  else
+    print "FAIL  composer thread identity"
+    failures=$((failures + 1))
+  fi
 else
   print "FAIL  injector log"
   failures=$((failures + 1))

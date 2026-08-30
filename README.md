@@ -15,7 +15,7 @@ The status is a real child of the composer toolbar DOM. It is not a floating mac
 
 ## What it shows
 
-- Active conversation tokens from `last_token_usage.total_tokens`
+- Tokens for the currently selected local conversation from `last_token_usage.total_tokens`
 - The runtime-reported `model_context_window`
 - Context occupancy percentage
 - Remaining primary usage limit and reset time from ChatGPT's authenticated `/wham/usage` client
@@ -59,10 +59,11 @@ The uninstaller removes the injected node, stops the background service, and mov
 ## How it works
 
 1. The launcher starts the official ChatGPT app with Chromium DevTools Protocol bound to `127.0.0.1:17654`.
-2. A user-level `launchd` service reads the newest local Codex rollout file for active context tokens and the runtime context window.
-3. Through CDP, the service discovers ChatGPT's authenticated API client at runtime and requests `/wham/usage` every 30 seconds. Only percentage, window length, and reset time leave the renderer.
-4. If the live request is temporarily unavailable, the service falls back to the last `rate_limits` snapshot in the rollout.
-5. It inserts a status node immediately after `[data-composer-navigation-target="permissions"]` and restores it after React rerenders.
+2. The service reads the active thread ID from the current composer DOM and maps that ID to its exact local rollout file. The selected sidebar row is only a fallback. Switching chats does not require sending a message.
+3. A user-level `launchd` service reads that rollout for active context tokens and the runtime context window.
+4. Through CDP, the service discovers ChatGPT's authenticated API client at runtime and requests `/wham/usage` every 30 seconds. Only percentage, window length, and reset time leave the renderer.
+5. If the live request is temporarily unavailable, the service falls back to the last `rate_limits` snapshot in the rollout.
+6. It inserts a status node immediately after `[data-composer-navigation-target="permissions"]` and restores it after React rerenders.
 
 The project does not modify `ChatGPT.app`, upload session contents, or include extracted OpenAI application code.
 
@@ -76,7 +77,7 @@ Do not use this project on an untrusted shared macOS account. Read [SECURITY.md]
 
 ## Known limitations
 
-- The displayed conversation is the most recently modified rollout file from the last three local calendar days. A background task can temporarily become the newest rollout.
+- When the selected thread DOM marker is unavailable, the utility falls back to the most recently modified rollout from the last three local calendar days.
 - Composer selectors may change after a ChatGPT desktop update. `./scripts/doctor.sh` reports `FAIL embedded composer node` when injection no longer matches.
 - Only the primary usage-limit window is displayed.
 - macOS is the only supported platform in this release.

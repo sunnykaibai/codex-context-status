@@ -19,6 +19,7 @@ let pendingRequests = new Map();
 let lastDiagnostic = "";
 let liveUsage = null;
 let nextLiveUsageRefreshAt = 0;
+const rolloutPathCache = new Map();
 
 function dateDirectory(root, date) {
   const year = String(date.getFullYear()).padStart(4, "0");
@@ -55,6 +56,105 @@ export function latestRolloutPath(root = defaultSessionsRoot) {
   return candidates[0]?.filePath ?? null;
 }
 
+export function normalizeThreadId(rawThreadId) {
+  if (typeof rawThreadId !== "string") return null;
+  const value = rawThreadId.startsWith("local:")
+    ? rawThreadId.slice("local:".length)
+    : rawThreadId;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+    ? value.toLowerCase()
+    : null;
+}
+
+function childDirectories(directory) {
+  try {
+    return fs.readdirSync(directory, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((a, b) => b.localeCompare(a));
+  } catch {
+    return [];
+  }
+}
+
+function rolloutSegmentMetadata(filePath) {
+  let descriptor;
+  try {
+    descriptor = fs.openSync(filePath, "r");
+    const buffer = Buffer.alloc(64 * 1024);
+    const bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
+    const firstLine = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0];
+    const event = JSON.parse(firstLine);
+    if (event?.type !== "session_meta") return null;
+    const timestamp = Date.parse(event?.payload?.timestamp ?? event.timestamp);
+    return {
+      threadId: normalizeThreadId(event?.payload?.id),
+      startedAt: Number.isFinite(timestamp) ? timestamp : null,
+    };
+  } catch {
+    return null;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+export function rolloutPathsForThread(root, rawThreadId) {
+  const threadId = normalizeThreadId(rawThreadId);
+  if (!threadId) return [];
+  const cacheKey = `${root}\0${threadId}`;
+  const cached = rolloutPathCache.get(cacheKey);
+  if (cached && Date.now() - cached.checkedAt < 1_000) {
+    if (cached.filePaths.every((filePath) => fs.existsSync(filePath))) return cached.filePaths;
+  }
+
+  const matches = [];
+  const filenamePattern = new RegExp(
+    `-${threadId}(?:_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?\\.jsonl$`,
+    "i",
+  );
+  for (const year of childDirectories(root)) {
+    const yearPath = path.join(root, year);
+    for (const month of childDirectories(yearPath)) {
+      const monthPath = path.join(yearPath, month);
+      for (const day of childDirectories(monthPath)) {
+        const dayPath = path.join(monthPath, day);
+        let names;
+        try {
+          names = fs.readdirSync(dayPath);
+        } catch {
+          continue;
+        }
+        for (const name of names) {
+          if (!name.startsWith("rollout-") || !filenamePattern.test(name)) continue;
+          const filePath = path.join(dayPath, name);
+          try {
+            const stat = fs.statSync(filePath);
+            if (!stat.isFile()) continue;
+            const metadata = rolloutSegmentMetadata(filePath);
+            if (metadata?.threadId !== threadId) continue;
+            const startedAt = metadata.startedAt ?? stat.birthtimeMs ?? stat.mtimeMs;
+            matches.push({ filePath, modified: stat.mtimeMs, startedAt });
+          } catch {
+            // The file may be rotated while the index is being built.
+          }
+        }
+      }
+    }
+  }
+
+  matches.sort((a, b) => b.startedAt - a.startedAt || b.modified - a.modified);
+  const filePaths = matches.map((match) => match.filePath);
+  rolloutPathCache.set(cacheKey, {
+    checkedAt: Date.now(),
+    filePaths,
+  });
+  return filePaths;
+}
+
+export function rolloutPathForThread(root, rawThreadId) {
+  return rolloutPathsForThread(root, rawThreadId)[0] ?? null;
+}
+
 function readTail(filePath, maximumBytes = 32 * 1024 * 1024) {
   const descriptor = fs.openSync(filePath, "r");
   try {
@@ -78,10 +178,7 @@ export function compactTokens(value) {
   return `${compact.toFixed(1)}K`;
 }
 
-export function readStatus(root = defaultSessionsRoot) {
-  const filePath = latestRolloutPath(root);
-  if (!filePath) return null;
-
+function readStatusFromFile(filePath, threadId) {
   let latest = null;
   for (const line of readTail(filePath).split("\n")) {
     if (!line) continue;
@@ -131,8 +228,24 @@ export function readStatus(root = defaultSessionsRoot) {
     remainingPercent,
     resetText,
     sourcePath: filePath,
+    threadId,
+    contextSource: threadId ? "focused-thread" : "latest-rollout",
     usageSource: "rollout",
   };
+}
+
+export function readStatus(root = defaultSessionsRoot, rawThreadId = null) {
+  const threadId = normalizeThreadId(rawThreadId);
+  if (!threadId) {
+    const filePath = latestRolloutPath(root);
+    return filePath ? readStatusFromFile(filePath, null) : null;
+  }
+
+  for (const filePath of rolloutPathsForThread(root, threadId)) {
+    const status = readStatusFromFile(filePath, threadId);
+    if (status) return status;
+  }
+  return null;
 }
 
 function formatResetTime(timestampSeconds) {
@@ -193,6 +306,40 @@ export function liveUsageExpression() {
       }
     }
     return { ok: false, reason: "authenticated-usage-client-not-found" };
+  }.toString()})()`;
+}
+
+export function activeThreadExpression() {
+  return `(${function readActiveThread() {
+    const composerRoot = document.querySelector(
+      '[data-codex-composer-root][data-composer-placement="thread"]',
+    );
+    const composerConversationId = composerRoot
+      ?.querySelector(
+        '[data-above-composer-portal="true"][data-above-composer-conversation-id]',
+      )
+      ?.getAttribute("data-above-composer-conversation-id") ?? null;
+    if (composerConversationId) {
+      return {
+        kind: "local",
+        source: "composer",
+        threadId: composerConversationId,
+      };
+    }
+
+    const selected = document.querySelector(
+      '[data-app-action-sidebar-thread-selected="true"][data-app-action-sidebar-thread-id]',
+    ) ?? document.querySelector(
+      '[data-app-action-sidebar-thread-active="true"][aria-current="page"][data-app-action-sidebar-thread-id]',
+    );
+    const raw = selected?.getAttribute("data-app-action-sidebar-thread-id") ?? null;
+    if (!raw) return null;
+    const separator = raw.indexOf(":");
+    return {
+      kind: separator === -1 ? null : raw.slice(0, separator),
+      source: "sidebar",
+      threadId: separator === -1 ? raw : raw.slice(separator + 1),
+    };
   }.toString()})()`;
 }
 
@@ -267,6 +414,8 @@ export function injectionExpression(status) {
       ok: true,
       rowClass: row.className,
       usageSource: snapshot.usageSource,
+      contextSource: snapshot.contextSource,
+      threadSelectionSource: snapshot.threadSelectionSource,
       remainingPercent: snapshot.remainingPercent,
       statusRect: status.getBoundingClientRect().toJSON(),
       permissionRect: permission.getBoundingClientRect().toJSON(),
@@ -332,9 +481,39 @@ function send(method, params = {}) {
 }
 
 async function injectOnce() {
-  let status = readStatus();
-  if (!status) return null;
   if (!(await connect())) return null;
+  let activeThread = null;
+  try {
+    const result = await send("Runtime.evaluate", {
+      expression: activeThreadExpression(),
+      returnByValue: true,
+    });
+    activeThread = result?.result?.value ?? null;
+  } catch {
+    // Fall back to the most recently modified rollout when focus cannot be resolved.
+  }
+  const focusedThreadId = normalizeThreadId(activeThread?.threadId);
+  let status = readStatus(defaultSessionsRoot, focusedThreadId);
+  if (status && focusedThreadId) {
+    status.threadSelectionSource = activeThread?.source ?? "unknown";
+  }
+  if (!status && focusedThreadId) {
+    status = {
+      contextUsedText: "—",
+      contextWindowText: "—",
+      contextPercentText: "—",
+      quotaLabel: "",
+      remainingPercent: null,
+      resetText: null,
+      sourcePath: null,
+      threadId: focusedThreadId,
+      contextSource: "focused-thread-missing",
+      threadSelectionSource: activeThread?.source ?? "unknown",
+      usageSource: "rollout",
+    };
+  }
+  if (!status) status = readStatus();
+  if (!status) return null;
   const now = Date.now();
   if (now >= nextLiveUsageRefreshAt) {
     try {
@@ -398,9 +577,29 @@ async function tick() {
 
 async function main() {
   if (process.argv.includes("--print-status")) {
-    const status = readStatus();
+    const threadFlagIndex = process.argv.indexOf("--thread");
+    const requestedThreadId = threadFlagIndex === -1
+      ? null
+      : process.argv[threadFlagIndex + 1] ?? null;
+    const status = readStatus(defaultSessionsRoot, requestedThreadId);
     if (!status) process.exitCode = 1;
     else console.log(JSON.stringify(status, null, 2));
+    return;
+  }
+  if (process.argv.includes("--print-active-thread")) {
+    try {
+      if (!(await connect())) {
+        process.exitCode = 1;
+        return;
+      }
+      const result = await send("Runtime.evaluate", {
+        expression: activeThreadExpression(),
+        returnByValue: true,
+      });
+      console.log(JSON.stringify(result?.result?.value ?? null, null, 2));
+    } finally {
+      socket?.close();
+    }
     return;
   }
   if (process.argv.includes("--print-live-usage")) {
