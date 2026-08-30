@@ -50,6 +50,11 @@ if [[ -f "$log_path" ]]; then
     print "FAIL  composer thread identity"
     failures=$((failures + 1))
   fi
+  if /usr/bin/grep -q '"contextSource":"fork-history-base"' "$log_path"; then
+    print "PASS  fork history fallback"
+  else
+    print "INFO  fork history fallback not observed in this session"
+  fi
 else
   print "FAIL  injector log"
   failures=$((failures + 1))

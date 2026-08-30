@@ -90,6 +90,16 @@ function rolloutSegmentMetadata(filePath) {
     return {
       threadId: normalizeThreadId(event?.payload?.id),
       startedAt: Number.isFinite(timestamp) ? timestamp : null,
+      forkedFromId: normalizeThreadId(event?.payload?.forked_from_id),
+      historyBaseThreadId: normalizeThreadId(event?.payload?.history_base?.thread_id),
+      historyBaseEndOrdinalExclusive: Number.isFinite(
+        event?.payload?.history_base?.end_ordinal_exclusive,
+      )
+        ? event.payload.history_base.end_ordinal_exclusive
+        : null,
+      historyBaseEndByteOffset: Number.isFinite(event?.payload?.history_base?.end_byte_offset)
+        ? event.payload.history_base.end_byte_offset
+        : null,
     };
   } catch {
     return null;
@@ -112,6 +122,24 @@ export function rolloutPathsForThread(root, rawThreadId) {
     `-${threadId}(?:_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?\\.jsonl$`,
     "i",
   );
+  const addCandidate = (filePath, name, storagePriority) => {
+    if (!name.startsWith("rollout-") || !filenamePattern.test(name)) return;
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) return;
+      const metadata = rolloutSegmentMetadata(filePath);
+      if (metadata?.threadId !== threadId) return;
+      const startedAt = metadata.startedAt ?? stat.birthtimeMs ?? stat.mtimeMs;
+      matches.push({
+        filePath,
+        modified: stat.mtimeMs,
+        startedAt,
+        storagePriority,
+      });
+    } catch {
+      // The file may be rotated while the index is being built.
+    }
+  };
   for (const year of childDirectories(root)) {
     const yearPath = path.join(root, year);
     for (const month of childDirectories(yearPath)) {
@@ -125,24 +153,31 @@ export function rolloutPathsForThread(root, rawThreadId) {
           continue;
         }
         for (const name of names) {
-          if (!name.startsWith("rollout-") || !filenamePattern.test(name)) continue;
           const filePath = path.join(dayPath, name);
-          try {
-            const stat = fs.statSync(filePath);
-            if (!stat.isFile()) continue;
-            const metadata = rolloutSegmentMetadata(filePath);
-            if (metadata?.threadId !== threadId) continue;
-            const startedAt = metadata.startedAt ?? stat.birthtimeMs ?? stat.mtimeMs;
-            matches.push({ filePath, modified: stat.mtimeMs, startedAt });
-          } catch {
-            // The file may be rotated while the index is being built.
-          }
+          addCandidate(filePath, name, 1);
         }
       }
     }
   }
 
-  matches.sort((a, b) => b.startedAt - a.startedAt || b.modified - a.modified);
+  if (path.basename(root) === "sessions") {
+    const archivedRoot = path.join(path.dirname(root), "archived_sessions");
+    let archivedNames = [];
+    try {
+      archivedNames = fs.readdirSync(archivedRoot);
+    } catch {
+      // Archived sessions are optional.
+    }
+    for (const name of archivedNames) {
+      addCandidate(path.join(archivedRoot, name), name, 0);
+    }
+  }
+
+  matches.sort(
+    (a, b) => b.startedAt - a.startedAt
+      || b.storagePriority - a.storagePriority
+      || b.modified - a.modified,
+  );
   const filePaths = matches.map((match) => match.filePath);
   rolloutPathCache.set(cacheKey, {
     checkedAt: Date.now(),
@@ -155,12 +190,15 @@ export function rolloutPathForThread(root, rawThreadId) {
   return rolloutPathsForThread(root, rawThreadId)[0] ?? null;
 }
 
-function readTail(filePath, maximumBytes = 32 * 1024 * 1024) {
+function readTail(filePath, maximumBytes = 32 * 1024 * 1024, endByteOffset = null) {
   const descriptor = fs.openSync(filePath, "r");
   try {
     const size = fs.fstatSync(descriptor).size;
-    const start = Math.max(0, size - maximumBytes);
-    const buffer = Buffer.alloc(size - start);
+    const end = Number.isFinite(endByteOffset)
+      ? Math.max(0, Math.min(size, endByteOffset))
+      : size;
+    const start = Math.max(0, end - maximumBytes);
+    const buffer = Buffer.alloc(end - start);
     fs.readSync(descriptor, buffer, 0, buffer.length, start);
     const text = buffer.toString("utf8");
     if (start === 0) return text;
@@ -178,18 +216,35 @@ export function compactTokens(value) {
   return `${compact.toFixed(1)}K`;
 }
 
-function readStatusFromFile(filePath, threadId) {
+function readStatusFromFile(filePath, threadId, options = {}) {
   let latest = null;
-  for (const line of readTail(filePath).split("\n")) {
-    if (!line) continue;
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
+  const fileSize = fs.statSync(filePath).size;
+  const effectiveEnd = Number.isFinite(options.endByteOffset)
+    ? Math.min(fileSize, options.endByteOffset)
+    : fileSize;
+  let maximumBytes = 32 * 1024 * 1024;
+  while (true) {
+    latest = null;
+    for (const line of readTail(filePath, maximumBytes, options.endByteOffset).split("\n")) {
+      if (!line) continue;
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (
+        Number.isFinite(options.endOrdinalExclusive)
+        && Number.isFinite(event?.ordinal)
+        && event.ordinal >= options.endOrdinalExclusive
+      ) {
+        continue;
+      }
+      if (event?.type !== "event_msg" || event?.payload?.type !== "token_count") continue;
+      latest = event.payload;
     }
-    if (event?.type !== "event_msg" || event?.payload?.type !== "token_count") continue;
-    latest = event.payload;
+    if (latest || maximumBytes >= effectiveEnd) break;
+    maximumBytes = Math.min(maximumBytes * 2, effectiveEnd);
   }
 
   const info = latest?.info;
@@ -234,18 +289,63 @@ function readStatusFromFile(filePath, threadId) {
   };
 }
 
+function readThreadStatus(root, threadId, options, visited) {
+  if (visited.has(threadId)) return null;
+  visited.add(threadId);
+
+  const candidates = rolloutPathsForThread(root, threadId);
+  for (const filePath of candidates) {
+    const status = readStatusFromFile(filePath, threadId, options);
+    if (status) return status;
+  }
+
+  const newestChildPath = candidates[0];
+  const childMetadata = newestChildPath ? rolloutSegmentMetadata(newestChildPath) : null;
+  const historyBaseThreadId = childMetadata?.historyBaseThreadId;
+  if (historyBaseThreadId) {
+    const inherited = readThreadStatus(
+      root,
+      historyBaseThreadId,
+      {
+        endOrdinalExclusive: childMetadata.historyBaseEndOrdinalExclusive,
+        endByteOffset: childMetadata.historyBaseEndByteOffset,
+      },
+      visited,
+    );
+    if (inherited) {
+      return {
+        ...inherited,
+        contextSource: "fork-history-base",
+        forkSourcePath: newestChildPath,
+        inheritedFromThreadId: historyBaseThreadId,
+        threadId,
+      };
+    }
+  }
+
+  const forkedFromId = childMetadata?.forkedFromId;
+  if (forkedFromId) {
+    const inherited = readThreadStatus(root, forkedFromId, {}, visited);
+    if (inherited) {
+      return {
+        ...inherited,
+        contextSource: "fork-parent-fallback",
+        forkSourcePath: newestChildPath,
+        inheritedFromThreadId: forkedFromId,
+        threadId,
+      };
+    }
+  }
+  return null;
+}
+
 export function readStatus(root = defaultSessionsRoot, rawThreadId = null) {
   const threadId = normalizeThreadId(rawThreadId);
   if (!threadId) {
     const filePath = latestRolloutPath(root);
     return filePath ? readStatusFromFile(filePath, null) : null;
   }
-
-  for (const filePath of rolloutPathsForThread(root, threadId)) {
-    const status = readStatusFromFile(filePath, threadId);
-    if (status) return status;
-  }
-  return null;
+  return readThreadStatus(root, threadId, {}, new Set());
 }
 
 function formatResetTime(timestampSeconds) {

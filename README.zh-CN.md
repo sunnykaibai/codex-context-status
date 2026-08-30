@@ -59,9 +59,10 @@ ChatGPT 完全退出后，应通过安装生成的启动器重新打开。若本
 1. 启动器让官方 ChatGPT 使用仅绑定 `127.0.0.1:17654` 的 Chromium DevTools Protocol。
 2. 服务从当前输入框 DOM 读取活动 thread ID，并把它映射到对应的本地 rollout 文件；侧边栏选中项只作为回退。切换对话后不需要发送消息。
 3. 用户级 `launchd` 服务从该 rollout 文件读取当前上下文和运行时窗口上限。
-4. 服务通过 CDP 在运行时发现 ChatGPT 已认证的 API 客户端，每 30 秒请求一次 `/wham/usage`。只有百分比、窗口长度和重置时间会离开渲染进程。
-5. 实时请求暂时失败时，服务回退到 rollout 中最后一条 `rate_limits` 快照。
-6. 服务在权限控件 `[data-composer-navigation-target="permissions"]` 后插入状态节点；React 重绘后会自动恢复。
+4. 新 fork 可能还没有自己的 `token_count`。在子对话产生 token 记录前，服务读取父 rollout 在 `history_base.end_ordinal_exclusive` 分叉点之前的最后一条 token 快照，不会使用父对话当前继续增长后的数值。
+5. 服务通过 CDP 在运行时发现 ChatGPT 已认证的 API 客户端，每 30 秒请求一次 `/wham/usage`。只有百分比、窗口长度和重置时间会离开渲染进程。
+6. 实时请求暂时失败时，服务回退到 rollout 中最后一条 `rate_limits` 快照。
+7. 服务在权限控件 `[data-composer-navigation-target="permissions"]` 后插入状态节点；React 重绘后会自动恢复。
 
 项目不会修改 `ChatGPT.app`，不会上传会话内容，也不包含从 OpenAI 应用中解包的代码。
 
@@ -76,6 +77,7 @@ CDP 具有读取和修改渲染页面的能力。同一 macOS 用户下的其他
 ## 已知限制
 
 - 无法读取当前选中 thread 的 DOM 标记时，工具才会回退到最近三个本地日期目录中最后更新的 rollout。
+- 当前 thread 和 fork 父链查找同时覆盖活动 `sessions` 与平铺的 `archived_sessions`。
 - ChatGPT 更新可能改变输入框选择器。运行 `./scripts/doctor.sh`，若出现 `FAIL embedded composer node`，说明当前版本不再兼容。
 - 当前只显示主要额度窗口。
 - 当前版本只支持 macOS。

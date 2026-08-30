@@ -203,3 +203,140 @@ test("selects the newest resumed rollout segment for a thread", () => {
   makeFile(resumed, "2026-01-02T00:00:00.000Z", 20_000);
   assert.equal(readStatus(root, threadId).contextUsed, 20_000);
 });
+
+test("uses the parent token snapshot at the fork boundary until the child has usage", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-context-fork-test-"));
+  const now = new Date();
+  const directory = path.join(
+    root,
+    String(now.getFullYear()).padStart(4, "0"),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  );
+  fs.mkdirSync(directory, { recursive: true });
+  const parentId = "01a0415f-b8db-7d71-b091-876a2261b939";
+  const childId = "01a051be-e7a7-7f11-b367-0efff8c3af88";
+  const meta = (id, timestamp, extra = {}) => JSON.stringify({
+    timestamp,
+    type: "session_meta",
+    payload: { id, timestamp, ...extra },
+  });
+  const token = (ordinal, totalTokens) => JSON.stringify({
+    ordinal,
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        last_token_usage: { total_tokens: totalTokens },
+        model_context_window: 828_400,
+      },
+      rate_limits: { primary: null },
+    },
+  });
+
+  const parentPath = path.join(directory, `rollout-2026-01-01T00-00-00-${parentId}.jsonl`);
+  const parentPrefix = `${meta(parentId, "2026-01-01T00:00:00.000Z")}\n${token(10, 100_000)}\n`;
+  fs.writeFileSync(parentPath, `${parentPrefix}${token(20, 200_000)}\n`);
+  const childPath = path.join(directory, `rollout-2026-01-02T00-00-00-${childId}.jsonl`);
+  const childMeta = meta(childId, "2026-01-02T00:00:00.000Z", {
+    forked_from_id: parentId,
+    history_base: {
+      thread_id: parentId,
+      end_ordinal_exclusive: 15,
+      end_byte_offset: Buffer.byteLength(parentPrefix),
+    },
+  });
+  fs.writeFileSync(childPath, `${childMeta}\n`);
+
+  const inherited = readStatus(root, childId);
+  assert.equal(inherited.contextUsed, 100_000);
+  assert.equal(inherited.contextSource, "fork-history-base");
+  assert.equal(inherited.inheritedFromThreadId, parentId);
+  assert.equal(inherited.threadId, childId);
+
+  fs.appendFileSync(childPath, `${token(30, 300_000)}\n`);
+  const childStatus = readStatus(root, childId);
+  assert.equal(childStatus.contextUsed, 300_000);
+  assert.equal(childStatus.contextSource, "focused-thread");
+});
+
+test("falls back to forked_from_id for legacy forks without history_base", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "codex-context-legacy-fork-test-"));
+  const root = path.join(base, "sessions");
+  const archivedRoot = path.join(base, "archived_sessions");
+  fs.mkdirSync(archivedRoot, { recursive: true });
+  const now = new Date();
+  const directory = path.join(
+    root,
+    String(now.getFullYear()).padStart(4, "0"),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  );
+  fs.mkdirSync(directory, { recursive: true });
+  const parentId = "01a0415f-b8db-7d71-b091-876a2261b939";
+  const childId = "01a04746-64c9-7341-8649-4e3a9219fd4f";
+  const parentMeta = JSON.stringify({
+    type: "session_meta",
+    payload: { id: parentId, timestamp: "2026-01-01T00:00:00.000Z" },
+  });
+  const parentToken = JSON.stringify({
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        last_token_usage: { total_tokens: 42_000 },
+        model_context_window: 258_400,
+      },
+      rate_limits: { primary: null },
+    },
+  });
+  const childMeta = JSON.stringify({
+    type: "session_meta",
+    payload: {
+      id: childId,
+      timestamp: "2026-01-02T00:00:00.000Z",
+      forked_from_id: parentId,
+    },
+  });
+  fs.writeFileSync(
+    path.join(archivedRoot, `rollout-2026-01-01T00-00-00-${parentId}.jsonl`),
+    `${parentMeta}\n${parentToken}\n`,
+  );
+  fs.writeFileSync(
+    path.join(directory, `rollout-2026-01-02T00-00-00-${childId}.jsonl`),
+    `${childMeta}\n`,
+  );
+
+  const status = readStatus(root, childId);
+  assert.equal(status.contextUsed, 42_000);
+  assert.equal(status.contextSource, "fork-parent-fallback");
+  assert.equal(status.threadId, childId);
+});
+
+test("stops safely when malformed fork metadata forms a cycle", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-context-fork-cycle-test-"));
+  const now = new Date();
+  const directory = path.join(
+    root,
+    String(now.getFullYear()).padStart(4, "0"),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  );
+  fs.mkdirSync(directory, { recursive: true });
+  const firstId = "01a0415f-b8db-7d71-b091-876a2261b939";
+  const secondId = "01a04746-64c9-7341-8649-4e3a9219fd4f";
+  const writeFork = (id, parentId, stamp) => {
+    const metadata = JSON.stringify({
+      type: "session_meta",
+      payload: { id, timestamp: stamp, forked_from_id: parentId },
+    });
+    fs.writeFileSync(
+      path.join(directory, `rollout-${stamp.slice(0, 10)}T00-00-00-${id}.jsonl`),
+      `${metadata}\n`,
+    );
+  };
+  writeFork(firstId, secondId, "2026-01-01T00:00:00.000Z");
+  writeFork(secondId, firstId, "2026-01-02T00:00:00.000Z");
+
+  assert.equal(readStatus(root, firstId), null);
+});
