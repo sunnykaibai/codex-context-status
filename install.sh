@@ -43,6 +43,7 @@ mkdir -p \
   "$HOME/Library/Logs"
 
 install -m 644 "$project_dir/src/injector.mjs" "$support_dir/injector.mjs"
+install -m 755 "$project_dir/scripts/restart-once.sh" "$support_dir/restart-once.sh"
 install -m 755 "$project_dir/scripts/launcher.sh" "$launcher_contents/MacOS/launcher.sh"
 install -m 644 "$project_dir/app/Info.plist" "$launcher_contents/Info.plist"
 /usr/bin/codesign --force --sign - "$launcher_app"
@@ -71,4 +72,5 @@ print "1. Quit ChatGPT completely."
 print "2. Open: $launcher_app"
 print "3. Run ./scripts/doctor.sh to verify the installation."
 print ""
+print "After a ChatGPT update, run ./scripts/arm-restart.sh and then quit ChatGPT once."
 print "The official ChatGPT.app was not modified."

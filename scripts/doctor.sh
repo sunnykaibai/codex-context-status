@@ -3,6 +3,8 @@ set -u
 
 port="${CODEX_CONTEXT_STATUS_PORT:-17654}"
 service_target="gui/$(id -u)/io.github.sunnykaibai.codex-context-status.injector"
+launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.injector.plist"
+support_dir="$HOME/Library/Application Support/CodexContextStatus"
 failures=0
 
 check() {
@@ -24,39 +26,33 @@ check "injector service" /bin/launchctl print "$service_target"
 check "loopback debugging port" /usr/sbin/lsof -nP -iTCP:"$port" -sTCP:LISTEN
 check "ChatGPT CDP endpoint" /usr/bin/curl -fsS --max-time 2 "http://127.0.0.1:$port/json"
 
-log_path="$HOME/Library/Logs/CodexContextStatus.log"
-if [[ -f "$log_path" ]]; then
-  if /usr/bin/grep -q '"ok":true' "$log_path"; then
+node_path="$(/usr/bin/plutil -extract ProgramArguments.0 raw -o - "$launch_agent" 2>/dev/null || true)"
+injector_path="$(/usr/bin/plutil -extract ProgramArguments.1 raw -o - "$launch_agent" 2>/dev/null || true)"
+if [[ -x "$node_path" && -f "$injector_path" ]]; then
+  active_output="$("$node_path" "$injector_path" --print-active-thread 2>/dev/null || true)"
+  live_output="$("$node_path" "$injector_path" --print-live-usage 2>/dev/null || true)"
+  embedded_output="$("$node_path" "$injector_path" --print-embedded-status 2>/dev/null || true)"
+
+  if print -r -- "$embedded_output" | /usr/bin/jq -e '.embedded == true' >/dev/null 2>&1; then
     print "PASS  embedded composer node"
   else
     print "FAIL  embedded composer node"
     failures=$((failures + 1))
   fi
-  if /usr/bin/grep -q '"usageSource":"live"' "$log_path"; then
+  if print -r -- "$live_output" | /usr/bin/jq -e '.ok == true' >/dev/null 2>&1; then
     print "PASS  live usage endpoint"
   else
     print "FAIL  live usage endpoint"
     failures=$((failures + 1))
   fi
-  if /usr/bin/grep -q '"contextSource":"focused-thread"' "$log_path"; then
-    print "PASS  focused thread mapping"
+  if print -r -- "$active_output" | /usr/bin/jq -e '.threadId != null' >/dev/null 2>&1; then
+    print "PASS  focused thread identity"
   else
-    print "FAIL  focused thread mapping"
+    print "FAIL  focused thread identity"
     failures=$((failures + 1))
-  fi
-  if /usr/bin/grep -q '"threadSelectionSource":"composer"' "$log_path"; then
-    print "PASS  composer thread identity"
-  else
-    print "FAIL  composer thread identity"
-    failures=$((failures + 1))
-  fi
-  if /usr/bin/grep -q '"contextSource":"fork-history-base"' "$log_path"; then
-    print "PASS  fork history fallback"
-  else
-    print "INFO  fork history fallback not observed in this session"
   fi
 else
-  print "FAIL  injector log"
+  print "FAIL  installed injector command"
   failures=$((failures + 1))
 fi
 

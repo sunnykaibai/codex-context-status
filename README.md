@@ -30,7 +30,7 @@ The utility deliberately does not use cumulative `total_token_usage` as the curr
 
 The installer prefers the Node.js runtime bundled with ChatGPT and falls back to a compatible system Node.js. No npm dependencies are required.
 
-Tested with ChatGPT desktop `26.825.31414`. The composer DOM is private implementation detail and can change in future releases.
+Tested with ChatGPT desktop `26.825.31414` and `26.901.20858`. The composer DOM is private implementation detail and can change in future releases.
 
 ## Install
 
@@ -47,6 +47,18 @@ Then:
 3. Run `./scripts/doctor.sh`.
 
 Use the installed launcher whenever ChatGPT has been fully quit. If ChatGPT is already running with the loopback debugging port, the launcher simply activates it.
+
+### After a ChatGPT update
+
+The built-in updater may restart ChatGPT without the local debugging argument. If the status disappears after an update, run:
+
+```zsh
+./scripts/arm-restart.sh
+```
+
+Then quit ChatGPT completely. The one-shot recovery job waits for that clean exit and reopens the installed context-enabled launcher. It does not terminate ChatGPT itself.
+
+`./scripts/doctor.sh` checks the current CDP endpoint and DOM directly. It does not treat historical log entries as current success.
 
 ## Uninstall
 
@@ -81,6 +93,7 @@ Do not use this project on an untrusted shared macOS account. Read [SECURITY.md]
 - When the selected thread DOM marker is unavailable, the utility falls back to the most recently modified rollout from the last three local calendar days.
 - Focused-thread and fork ancestry lookup searches both active `sessions` and flat `archived_sessions` storage.
 - Composer selectors may change after a ChatGPT desktop update. `./scripts/doctor.sh` reports `FAIL embedded composer node` when injection no longer matches.
+- A renderer can be replaced while its old WebSocket still appears open. CDP connections and requests are time-bounded; an unresponsive renderer is discarded and rediscovered automatically.
 - Only the primary usage-limit window is displayed.
 - macOS is the only supported platform in this release.
 

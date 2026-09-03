@@ -28,7 +28,7 @@
 
 安装脚本优先使用 ChatGPT 自带的 Node.js；没有 npm 依赖，也不会自动下载第三方软件。
 
-当前已在 ChatGPT 桌面端 `26.825.31414` 上验证。输入框 DOM 属于应用内部实现，后续版本可能改变。
+当前已在 ChatGPT 桌面端 `26.825.31414` 和 `26.901.20858` 上验证。输入框 DOM 属于应用内部实现，后续版本可能改变。
 
 ## 安装
 
@@ -45,6 +45,18 @@ cd codex-context-status
 3. 运行 `./scripts/doctor.sh`。
 
 ChatGPT 完全退出后，应通过安装生成的启动器重新打开。若本地调试端口已经存在，启动器只会激活当前 ChatGPT。
+
+### ChatGPT 更新后
+
+内置更新程序可能不带本地调试参数直接重启 ChatGPT。若更新后状态消失，运行：
+
+```zsh
+./scripts/arm-restart.sh
+```
+
+随后完全退出 ChatGPT。一次性恢复任务会等待应用正常退出，再通过安装好的启动器重新打开；它不会主动终止 ChatGPT。
+
+`./scripts/doctor.sh` 现在直接检查当前 CDP 和 DOM，不会把历史日志中的成功记录当成当前状态。
 
 ## 卸载
 
@@ -79,6 +91,7 @@ CDP 具有读取和修改渲染页面的能力。同一 macOS 用户下的其他
 - 无法读取当前选中 thread 的 DOM 标记时，工具才会回退到最近三个本地日期目录中最后更新的 rollout。
 - 当前 thread 和 fork 父链查找同时覆盖活动 `sessions` 与平铺的 `archived_sessions`。
 - ChatGPT 更新可能改变输入框选择器。运行 `./scripts/doctor.sh`，若出现 `FAIL embedded composer node`，说明当前版本不再兼容。
+- renderer 可能已经被替换，但旧 WebSocket 仍暂时显示为打开。CDP 连接和请求现在都有超时；失去响应的 renderer 会被丢弃并自动重新发现。
 - 当前只显示主要额度窗口。
 - 当前版本只支持 macOS。
 

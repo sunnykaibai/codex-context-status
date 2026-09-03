@@ -8,6 +8,7 @@ import {
   activeThreadExpression,
   applyLiveUsage,
   compactTokens,
+  embeddedStatusExpression,
   injectionExpression,
   liveUsageExpression,
   normalizeThreadId,
@@ -339,4 +340,11 @@ test("stops safely when malformed fork metadata forms a cycle", () => {
   writeFork(secondId, firstId, "2026-01-02T00:00:00.000Z");
 
   assert.equal(readStatus(root, firstId), null);
+});
+
+test("live doctor checks the current DOM instead of historical logs", () => {
+  const expression = embeddedStatusExpression();
+  assert.match(expression, /data-codex-context-status/);
+  assert.match(expression, /data-composer-navigation-target/);
+  assert.match(expression, /hasStatus/);
 });

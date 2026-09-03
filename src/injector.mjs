@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 const DEBUG_HOST = "127.0.0.1";
 const DEBUG_PORT = Number(process.env.CODEX_CONTEXT_STATUS_PORT ?? 17654);
 const POLL_INTERVAL_MS = 1000;
+const CDP_CONNECT_TIMEOUT_MS = 3_000;
+const CDP_REQUEST_TIMEOUT_MS = 5_000;
 const LIVE_USAGE_INTERVAL_MS = Math.max(
   10_000,
   Number(process.env.CODEX_USAGE_REFRESH_MS ?? 30_000),
@@ -19,6 +21,7 @@ let pendingRequests = new Map();
 let lastDiagnostic = "";
 let liveUsage = null;
 let nextLiveUsageRefreshAt = 0;
+let tickInFlight = false;
 const rolloutPathCache = new Map();
 
 function dateDirectory(root, date) {
@@ -443,6 +446,19 @@ export function activeThreadExpression() {
   }.toString()})()`;
 }
 
+export function embeddedStatusExpression() {
+  return `(${function readEmbeddedStatus() {
+    const status = document.querySelector('[data-codex-context-status="embedded"]');
+    const permission = document.querySelector('[data-composer-navigation-target="permissions"]');
+    return {
+      embedded: Boolean(status && permission && status.parentElement?.contains(permission)),
+      hasPermissionControl: Boolean(permission),
+      hasStatus: Boolean(status),
+      text: status?.textContent ?? null,
+    };
+  }.toString()})()`;
+}
+
 export function injectionExpression(status) {
   const payload = JSON.stringify(status);
   return `(${function injectEmbeddedStatus(snapshot) {
@@ -550,20 +566,39 @@ async function connect() {
     const pending = pendingRequests.get(message.id);
     if (!pending) return;
     pendingRequests.delete(message.id);
+    clearTimeout(pending.timeout);
     if (message.error) pending.reject(new Error(message.error.message));
     else pending.resolve(message.result);
   });
   socket.addEventListener("close", () => {
     socket = null;
     for (const pending of pendingRequests.values()) {
+      clearTimeout(pending.timeout);
       pending.reject(new Error("CDP connection closed"));
     }
     pendingRequests.clear();
   });
 
+  const connectingSocket = socket;
   await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      connectingSocket.removeEventListener("open", onOpen);
+      connectingSocket.removeEventListener("error", onError);
+      callback(value);
+    };
+    const onOpen = () => finish(resolve);
+    const onError = (event) => finish(reject, event?.error ?? new Error("CDP connection failed"));
+    const timeout = setTimeout(() => {
+      if (socket === connectingSocket) socket = null;
+      connectingSocket.close();
+      finish(reject, new Error("CDP connection timed out"));
+    }, CDP_CONNECT_TIMEOUT_MS);
+    connectingSocket.addEventListener("open", onOpen, { once: true });
+    connectingSocket.addEventListener("error", onError, { once: true });
   });
   return true;
 }
@@ -575,8 +610,21 @@ function send(method, params = {}) {
       return;
     }
     const id = nextRequestId++;
-    pendingRequests.set(id, { resolve, reject });
-    socket.send(JSON.stringify({ id, method, params }));
+    const requestSocket = socket;
+    const timeout = setTimeout(() => {
+      if (!pendingRequests.delete(id)) return;
+      if (socket === requestSocket) socket = null;
+      requestSocket.close();
+      reject(new Error(`CDP request timed out: ${method}`));
+    }, CDP_REQUEST_TIMEOUT_MS);
+    pendingRequests.set(id, { resolve, reject, timeout });
+    try {
+      requestSocket.send(JSON.stringify({ id, method, params }));
+    } catch (error) {
+      clearTimeout(timeout);
+      pendingRequests.delete(id);
+      reject(error);
+    }
   });
 }
 
@@ -675,6 +723,16 @@ async function tick() {
   }
 }
 
+async function guardedTick() {
+  if (tickInFlight) return;
+  tickInFlight = true;
+  try {
+    await tick();
+  } finally {
+    tickInFlight = false;
+  }
+}
+
 async function main() {
   if (process.argv.includes("--print-status")) {
     const threadFlagIndex = process.argv.indexOf("--thread");
@@ -694,6 +752,22 @@ async function main() {
       }
       const result = await send("Runtime.evaluate", {
         expression: activeThreadExpression(),
+        returnByValue: true,
+      });
+      console.log(JSON.stringify(result?.result?.value ?? null, null, 2));
+    } finally {
+      socket?.close();
+    }
+    return;
+  }
+  if (process.argv.includes("--print-embedded-status")) {
+    try {
+      if (!(await connect())) {
+        process.exitCode = 1;
+        return;
+      }
+      const result = await send("Runtime.evaluate", {
+        expression: embeddedStatusExpression(),
         returnByValue: true,
       });
       console.log(JSON.stringify(result?.result?.value ?? null, null, 2));
@@ -729,8 +803,10 @@ async function main() {
   }
 
   console.log(new Date().toISOString(), `Waiting for ChatGPT CDP on ${DEBUG_HOST}:${DEBUG_PORT}`);
-  await tick();
-  const timer = setInterval(tick, POLL_INTERVAL_MS);
+  await guardedTick();
+  const timer = setInterval(() => {
+    void guardedTick();
+  }, POLL_INTERVAL_MS);
   const stop = () => {
     clearInterval(timer);
     socket?.close();
