@@ -1,15 +1,19 @@
 # Codex Context Status
 
-Persistently show the active Codex context-window usage inside the ChatGPT macOS composer.
+Show the active Codex context window and account usage limit directly inside the ChatGPT macOS composer.
 
-Version 0.2 uses the context indicator built into ChatGPT itself. It follows the selected conversation, survives normal `Cmd-Q` restarts, and is stored outside the application bundle, so ordinary app updates do not remove it.
+```text
+Full access   Context 123K / 828K  14.9%  |  Weekly 79%  09-04 00:52
+```
+
+The status is a real child of the composer toolbar DOM. It is not a floating macOS window and moves with the composer when the input area changes size.
 
 > [!IMPORTANT]
-> This is an unofficial macOS utility. It is not affiliated with or endorsed by OpenAI. ChatGPT and Codex are trademarks of OpenAI.
+> This is an unofficial, experimental macOS utility. It is not affiliated with or endorsed by OpenAI. ChatGPT and Codex are trademarks of OpenAI.
 
 [简体中文说明](README.zh-CN.md)
 
-## Native mode (recommended)
+## Install
 
 ```zsh
 git clone https://github.com/sunnykaibai/codex-context-status.git
@@ -17,29 +21,38 @@ cd codex-context-status
 ./install.sh
 ```
 
-The installer enables ChatGPT's native `show-context-window-usage` preference and disables the old CDP injector service. If ChatGPT is already open, the installer arms a one-shot activation task. Quit ChatGPT once; the task writes the setting only after the old process has fully exited, then automatically reopens the official `/Applications/ChatGPT.app`.
+If ChatGPT is running, quit it once after installation. A one-shot task will reopen the app with the full status bar. Do not reopen it manually during this first transition.
 
-Verify the installation with `./scripts/doctor-native.sh`.
+Afterwards, a user-level startup supervisor checks every new ChatGPT main process. Opening the official Dock icon or an updater relaunch without CDP causes one early automatic restart through the context-enabled launcher. The supervisor sends `TERM` only to the newly observed main process and refuses to force-kill it if graceful termination fails.
 
-The native indicator is part of the composer footer. Hovering it shows the percentage and the used/context-window token counts. Because ChatGPT owns the component and its data, it updates with the active conversation and handles resumed and forked conversations without scanning rollout files.
+Run `./scripts/doctor.sh` after the automatic reopen.
 
-## Why v0.2 changed the architecture
+## What it shows
 
-Versions 0.1.x inserted a combined context and weekly-quota bar through Chromium DevTools Protocol (CDP). CDP must be enabled when the Electron process starts. A background LaunchAgent cannot add that flag to an app already opened from the official Dock icon, and the built-in updater can relaunch ChatGPT without it.
+- Tokens for the currently selected local conversation from `last_token_usage.total_tokens`
+- The runtime-reported `model_context_window`
+- Context occupancy percentage
+- Remaining primary usage limit and reset time from ChatGPT's authenticated `/wham/usage` client
 
-The native preference is stored in `~/.codex/.codex-global-state.json`, not inside `/Applications/ChatGPT.app`. Writing that file while ChatGPT is open is unsafe because the running process can restore its cached state on exit. The one-shot activation therefore waits for a complete exit, updates both the primary state and Codex's recovery copy atomically, and keeps a safety copy at `~/.codex/.codex-global-state.json.codex-context-status.bak`.
+The utility deliberately does not use cumulative `total_token_usage` as the current context size.
 
-No ChatGPT application files are modified or re-signed.
+## How it survives restarts and updates
 
-## Legacy combined context + quota bar
+Chromium DevTools Protocol (CDP) must be enabled when Electron starts; it cannot be attached to an already running ChatGPT process. The launcher supplies the loopback-only CDP arguments, while the supervisor corrects starts from the official icon and updater relaunches that omit them.
 
-The native ChatGPT component currently shows context usage only. ChatGPT does not expose a supported composer extension point for adding the weekly quota and reset time.
+The official `/Applications/ChatGPT.app` is never modified or re-signed. A future ChatGPT release can still change its private composer DOM; `./scripts/doctor.sh` reports that separately from startup recovery.
 
-If you prefer the old combined text bar, run `./install-legacy.sh`, completely quit ChatGPT, and open `~/Applications/ChatGPT Context Status.app`. This mode retains the original limitation: after a full quit or an updater relaunch, it works only when ChatGPT starts with the special launcher and CDP port.
+## Compact native alternative
+
+ChatGPT also contains a native context-only indicator. It survives updates without CDP, but it does not show the weekly quota or reset time and does not preserve this project's text-bar appearance. To switch to it, run:
+
+```zsh
+./install-native.sh
+```
 
 ## Security
 
-Native mode does not open a debugging port. Legacy mode binds CDP to `127.0.0.1:17654`; another process running as the same macOS user can inspect or modify the renderer while that port is open. Read [SECURITY.md](SECURITY.md) before enabling Legacy mode.
+The full bar binds CDP to `127.0.0.1:17654`. Another process running as the same macOS user can inspect or modify the renderer while that port is open. Read [SECURITY.md](SECURITY.md) before installing.
 
 ## Uninstall
 
@@ -52,7 +65,7 @@ Native mode does not open a debugging port. Legacy mode binds CDP to `127.0.0.1:
 ```zsh
 npm test
 npm run check
-zsh -n install.sh install-legacy.sh uninstall.sh scripts/*.sh
+zsh -n install.sh install-native.sh install-legacy.sh uninstall.sh scripts/*.sh
 plutil -lint app/Info.plist launchd/*.plist
 ```
 

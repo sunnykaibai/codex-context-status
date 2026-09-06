@@ -1,18 +1,20 @@
 # Security
 
-## Native mode
+## Optional native mode
 
-The default installer enables a ChatGPT-owned preference in `~/.codex/.codex-global-state.json`. It does not modify the ChatGPT application bundle, inspect conversations, open a network listener, or reuse authenticated requests.
+The optional `install-native.sh` enables a ChatGPT-owned preference in `~/.codex/.codex-global-state.json`. It does not modify the ChatGPT application bundle, inspect conversations, open a network listener, or reuse authenticated requests.
 
 The installer preserves a one-time copy of the pre-install state at `~/.codex/.codex-global-state.json.codex-context-status.bak`. Updates are written to a temporary file in the same directory and atomically renamed into place.
 
-## Legacy local debugging endpoint
+## Local debugging endpoint
 
-The optional `install-legacy.sh` starts ChatGPT with Chromium DevTools Protocol on `127.0.0.1:17654`. CDP has no authentication and can inspect or modify renderer content. Any process running as the same macOS user may be able to connect while ChatGPT is running.
+The default installer starts ChatGPT with Chromium DevTools Protocol on `127.0.0.1:17654`. CDP has no authentication and can inspect or modify renderer content. Any process running as the same macOS user may be able to connect while ChatGPT is running.
+
+The startup supervisor checks newly observed ChatGPT processes. When a process starts without the expected CDP endpoint, the supervisor sends `TERM`, waits for graceful exit, and reopens the local launcher. It refuses to force-kill a process that does not exit. This can produce one visible restart after an official-icon launch or app update.
 
 The launcher explicitly binds to loopback. Do not change the debugging address to `0.0.0.0` or expose the port through port forwarding, containers, SSH tunnels, or network proxies.
 
-## Legacy local data
+## Local data
 
 The injector reads JSONL events under `~/.codex/sessions` for token counts and context-window size. For current account limits, it asks ChatGPT's existing authenticated client to request `/wham/usage`. The injected expression returns only `used_percent`, `limit_window_seconds`, `reset_at`, and a fetch timestamp. Credentials and the endpoint's account fields remain inside the renderer.
 
@@ -22,11 +24,12 @@ The diagnostic log contains DOM selector results, element rectangles, and errors
 
 ## Trust boundary
 
-Install only from a source tree you have reviewed. Legacy mode creates:
+Install only from a source tree you have reviewed. The full-bar mode creates:
 
 - `~/Applications/ChatGPT Context Status.app`
 - `~/Library/Application Support/CodexContextStatus/`
 - `~/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.injector.plist`
+- `~/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.supervisor.plist`
 - `~/Library/Logs/CodexContextStatus.log`
 
 The official `/Applications/ChatGPT.app` is not modified or re-signed.

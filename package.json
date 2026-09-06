@@ -1,9 +1,9 @@
 {
   "name": "codex-context-status",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Persistently show live Codex context usage inside the ChatGPT macOS composer.",
+  "description": "Show live Codex context and quota status inside the ChatGPT macOS composer.",
   "scripts": {
     "check": "node --check src/injector.mjs && node --check src/native-setting.mjs",
     "test": "TZ=UTC node --test"

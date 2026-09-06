@@ -17,5 +17,5 @@ jobs:
           node-version: 24
       - run: npm test
       - run: npm run check
-      - run: zsh -n install.sh install-legacy.sh uninstall.sh scripts/*.sh
+      - run: zsh -n install.sh install-native.sh install-legacy.sh uninstall.sh scripts/*.sh
       - run: plutil -lint app/Info.plist launchd/*.plist

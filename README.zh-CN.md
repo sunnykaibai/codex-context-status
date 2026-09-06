@@ -1,13 +1,17 @@
 # Codex Context Status
 
-在 ChatGPT macOS 输入框内持久显示当前 Codex 对话的上下文占用。
+在 ChatGPT macOS 输入框内显示当前 Codex 对话的上下文占用和账户额度。
 
-0.2 版改用 ChatGPT 自带的 Context 指示器。它由应用按当前对话更新，正常 `Cmd-Q` 退出重开后仍然有效；设置保存在应用包之外，普通的 ChatGPT 自动更新也不会删除它。
+```text
+完全访问   Context 123K / 828K  14.9%  |  周额度 79%  09-04 00:52
+```
+
+状态栏是输入框工具栏的真实 DOM 子节点，不是浮动的 macOS 窗口；输入框尺寸变化时，它会跟随输入框移动。
 
 > [!IMPORTANT]
-> 这是非官方 macOS 工具，与 OpenAI 没有关联，也未获得 OpenAI 背书。ChatGPT 和 Codex 是 OpenAI 的商标。
+> 这是非官方实验性 macOS 工具，与 OpenAI 没有关联，也未获得 OpenAI 背书。ChatGPT 和 Codex 是 OpenAI 的商标。
 
-## 原生模式（推荐）
+## 安装
 
 ```zsh
 git clone https://github.com/sunnykaibai/codex-context-status.git
@@ -15,29 +19,38 @@ cd codex-context-status
 ./install.sh
 ```
 
-安装器会启用 ChatGPT 原生的 `show-context-window-usage` 设置，并停用旧的 CDP 注入服务。如果 ChatGPT 正在运行，安装器会登记一次性激活任务。请完整退出一次；任务会等旧进程彻底结束后再写入设置，然后自动重新打开官方 `/Applications/ChatGPT.app`。
+如果 ChatGPT 正在运行，安装后请完整退出一次。一次性任务会自动用完整状态栏重新打开应用；首次切换期间不要手动抢先打开。
 
-使用 `./scripts/doctor-native.sh` 检查安装结果。
+此后，用户级启动守护程序会检查每一个新的 ChatGPT 主进程。如果你从官方 Dock 图标启动，或者更新器重启应用时没有携带 CDP 参数，守护程序会在启动初期自动重开一次，并改用带 Context 状态栏的启动器。它只会向刚发现的主进程发送 `TERM`；如果应用不能正常退出，守护程序不会强制结束进程。
 
-原生指示器位于输入框底部工具栏。把鼠标移到图标上，会显示占用百分比和“已用 token / 上下文窗口 token”。组件和数据都由 ChatGPT 自身管理，因此切换对话、恢复对话和 fork 对话时，不需要再扫描本地 rollout 文件。
+自动重开后，运行 `./scripts/doctor.sh` 检查状态。
 
-## 为什么 0.2 版要更换实现
+## 显示内容
 
-0.1.x 通过 Chromium DevTools Protocol（CDP）插入“Context + 周额度 + 重置时间”文字栏。CDP 参数只能在 Electron 进程启动时加入。后台 LaunchAgent 无法给已经从官方 Dock 图标打开的 ChatGPT 补参数，应用更新器重启 ChatGPT 时也可能不带这个参数。
+- 当前选中本地对话的 `last_token_usage.total_tokens`
+- 运行时实际报告的 `model_context_window`
+- 上下文占用百分比
+- ChatGPT 已认证 `/wham/usage` 客户端返回的主要额度剩余比例和重置时间
 
-原生开关保存在 `~/.codex/.codex-global-state.json`，不在 `/Applications/ChatGPT.app` 内。ChatGPT 运行时直接改这个文件并不安全，因为旧进程退出时可能把内存里的旧状态重新写回。一次性激活任务会等待应用完全退出，再原子更新主状态文件和 Codex 的恢复副本，并保留安全备份：`~/.codex/.codex-global-state.json.codex-context-status.bak`。
+工具不会把累计的 `total_token_usage` 当成当前上下文长度。
 
-这个方案不会修改或重新签名 ChatGPT 应用。
+## 为什么退出和更新后仍能恢复
 
-## 旧版 Context + 周额度组合栏
+Chromium DevTools Protocol（CDP）只能在 Electron 启动时开启，无法事后附加到已经运行的 ChatGPT 进程。启动器负责加入仅监听本机回环地址的 CDP 参数，守护程序负责纠正官方图标启动和更新器重启时缺少参数的情况。
 
-ChatGPT 当前的原生组件只显示上下文占用，没有提供把周额度和重置时间加入输入框的受支持扩展接口。
+工具不会修改或重新签名官方 `/Applications/ChatGPT.app`。未来版本仍可能修改私有的输入框 DOM；`./scripts/doctor.sh` 会把 DOM 不兼容和启动恢复失败分别报告。
 
-如果你更喜欢原来的组合文字栏，可以运行 `./install-legacy.sh`，然后完整退出 ChatGPT，并打开 `~/Applications/ChatGPT Context Status.app`。这个模式仍有原来的限制：完整退出或更新器重启后，必须通过特殊启动器启动 ChatGPT 并打开 CDP 端口。
+## 原生紧凑模式
+
+ChatGPT 自带一个只显示 Context 的小图标。它不依赖 CDP，但不显示周额度和重置时间，也不能保留这套文字栏视觉。需要切换时运行：
+
+```zsh
+./install-native.sh
+```
 
 ## 安全性
 
-原生模式不会打开调试端口。Legacy 模式会在 `127.0.0.1:17654` 开启 CDP；端口开启时，同一 macOS 用户下的其他进程可以检查或修改 renderer。启用 Legacy 模式前请阅读 [SECURITY.md](SECURITY.md)。
+完整状态栏会在 `127.0.0.1:17654` 开启 CDP。端口开启时，同一 macOS 用户下的其他进程可以检查或修改 renderer。安装前请阅读 [SECURITY.md](SECURITY.md)。
 
 ## 卸载
 
@@ -50,7 +63,7 @@ ChatGPT 当前的原生组件只显示上下文占用，没有提供把周额度
 ```zsh
 npm test
 npm run check
-zsh -n install.sh install-legacy.sh uninstall.sh scripts/*.sh
+zsh -n install.sh install-native.sh install-legacy.sh uninstall.sh scripts/*.sh
 plutil -lint app/Info.plist launchd/*.plist
 ```
 

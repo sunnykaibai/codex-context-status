@@ -7,6 +7,9 @@ launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-sta
 restart_launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.restart-once.plist"
 activation_launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.native-on-exit.plist"
 completed_activation_launch_agent="$activation_launch_agent.completed"
+supervisor_launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.supervisor.plist"
+legacy_activation_launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.legacy-activate-on-exit.plist"
+completed_legacy_activation_launch_agent="$legacy_activation_launch_agent.completed"
 service_target="gui/$(id -u)"
 timestamp="$(date '+%Y%m%d-%H%M%S')"
 node_path="$(/usr/bin/plutil -extract ProgramArguments.0 raw -o - "$launch_agent" 2>/dev/null || true)"
@@ -25,6 +28,8 @@ fi
 /bin/launchctl bootout "$service_target/io.github.sunnykaibai.codex-context-status.injector" 2>/dev/null || true
 /bin/launchctl bootout "$service_target/io.github.sunnykaibai.codex-context-status.restart-once" 2>/dev/null || true
 /bin/launchctl bootout "$service_target/io.github.sunnykaibai.codex-context-status.native-on-exit" 2>/dev/null || true
+/bin/launchctl bootout "$service_target/io.github.sunnykaibai.codex-context-status.supervisor" 2>/dev/null || true
+/bin/launchctl bootout "$service_target/io.github.sunnykaibai.codex-context-status.legacy-activate-on-exit" 2>/dev/null || true
 
 if [[ -e "$launcher_app" ]]; then
   mv "$launcher_app" "$HOME/.Trash/ChatGPT Context Status-$timestamp.app"
@@ -43,6 +48,15 @@ if [[ -e "$activation_launch_agent" ]]; then
 fi
 if [[ -e "$completed_activation_launch_agent" ]]; then
   mv "$completed_activation_launch_agent" "$HOME/.Trash/io.github.sunnykaibai.codex-context-status.native-on-exit-completed-$timestamp.plist"
+fi
+if [[ -e "$supervisor_launch_agent" ]]; then
+  mv "$supervisor_launch_agent" "$HOME/.Trash/io.github.sunnykaibai.codex-context-status.supervisor-$timestamp.plist"
+fi
+if [[ -e "$legacy_activation_launch_agent" ]]; then
+  mv "$legacy_activation_launch_agent" "$HOME/.Trash/io.github.sunnykaibai.codex-context-status.legacy-activate-on-exit-$timestamp.plist"
+fi
+if [[ -e "$completed_legacy_activation_launch_agent" ]]; then
+  mv "$completed_legacy_activation_launch_agent" "$HOME/.Trash/io.github.sunnykaibai.codex-context-status.legacy-activate-on-exit-completed-$timestamp.plist"
 fi
 
 print "Uninstalled Codex Context Status. Removed files were moved to Trash."

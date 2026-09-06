@@ -1,7 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
-while /usr/bin/pgrep -x ChatGPT >/dev/null 2>&1; do
+while /bin/ps -axo command= | /usr/bin/awk \
+  '$1 == "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT" { found = 1 } END { exit !found }'; do
   sleep 0.5
 done
 

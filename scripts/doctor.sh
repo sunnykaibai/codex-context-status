@@ -3,6 +3,8 @@ set -u
 
 port="${CODEX_CONTEXT_STATUS_PORT:-17654}"
 service_target="gui/$(id -u)/io.github.sunnykaibai.codex-context-status.injector"
+supervisor_target="gui/$(id -u)/io.github.sunnykaibai.codex-context-status.supervisor"
+activation_target="gui/$(id -u)/io.github.sunnykaibai.codex-context-status.legacy-activate-on-exit"
 launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.injector.plist"
 support_dir="$HOME/Library/Application Support/CodexContextStatus"
 failures=0
@@ -23,6 +25,14 @@ check "ChatGPT.app" test -d /Applications/ChatGPT.app
 check "Codex sessions" test -d "$HOME/.codex/sessions"
 check "launcher app" test -d "$HOME/Applications/ChatGPT Context Status.app"
 check "injector service" /bin/launchctl print "$service_target"
+if /bin/launchctl print "$supervisor_target" >/dev/null 2>&1; then
+  print "PASS  startup supervisor"
+elif /bin/launchctl print "$activation_target" >/dev/null 2>&1; then
+  print "WAIT  startup supervisor activates after ChatGPT exits"
+else
+  print "FAIL  startup supervisor"
+  failures=$((failures + 1))
+fi
 check "loopback debugging port" /usr/sbin/lsof -nP -iTCP:"$port" -sTCP:LISTEN
 check "ChatGPT CDP endpoint" /usr/bin/curl -fsS --max-time 2 "http://127.0.0.1:$port/json"
 
