@@ -5,6 +5,8 @@ support_dir="$HOME/Library/Application Support/CodexContextStatus"
 launcher_app="$HOME/Applications/ChatGPT Context Status.app"
 launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.injector.plist"
 restart_launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.restart-once.plist"
+activation_launch_agent="$HOME/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.native-on-exit.plist"
+completed_activation_launch_agent="$activation_launch_agent.completed"
 service_target="gui/$(id -u)"
 timestamp="$(date '+%Y%m%d-%H%M%S')"
 node_path="$(/usr/bin/plutil -extract ProgramArguments.0 raw -o - "$launch_agent" 2>/dev/null || true)"
@@ -22,6 +24,7 @@ if [[ -x "$node_path" && -f "$support_dir/injector.mjs" ]]; then
 fi
 /bin/launchctl bootout "$service_target/io.github.sunnykaibai.codex-context-status.injector" 2>/dev/null || true
 /bin/launchctl bootout "$service_target/io.github.sunnykaibai.codex-context-status.restart-once" 2>/dev/null || true
+/bin/launchctl bootout "$service_target/io.github.sunnykaibai.codex-context-status.native-on-exit" 2>/dev/null || true
 
 if [[ -e "$launcher_app" ]]; then
   mv "$launcher_app" "$HOME/.Trash/ChatGPT Context Status-$timestamp.app"
@@ -34,6 +37,12 @@ if [[ -e "$launch_agent" ]]; then
 fi
 if [[ -e "$restart_launch_agent" ]]; then
   mv "$restart_launch_agent" "$HOME/.Trash/io.github.sunnykaibai.codex-context-status.restart-once-$timestamp.plist"
+fi
+if [[ -e "$activation_launch_agent" ]]; then
+  mv "$activation_launch_agent" "$HOME/.Trash/io.github.sunnykaibai.codex-context-status.native-on-exit-$timestamp.plist"
+fi
+if [[ -e "$completed_activation_launch_agent" ]]; then
+  mv "$completed_activation_launch_agent" "$HOME/.Trash/io.github.sunnykaibai.codex-context-status.native-on-exit-completed-$timestamp.plist"
 fi
 
 print "Uninstalled Codex Context Status. Removed files were moved to Trash."

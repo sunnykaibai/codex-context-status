@@ -1,6 +1,6 @@
 {
   "name": "codex-context-status",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Persistently show live Codex context usage inside the ChatGPT macOS composer.",

@@ -15,7 +15,7 @@ cd codex-context-status
 ./install.sh
 ```
 
-安装器会启用 ChatGPT 原生的 `show-context-window-usage` 设置，并停用旧的 CDP 注入服务。如果 ChatGPT 正在运行，请完整退出一次，然后直接打开官方 `/Applications/ChatGPT.app`。
+安装器会启用 ChatGPT 原生的 `show-context-window-usage` 设置，并停用旧的 CDP 注入服务。如果 ChatGPT 正在运行，安装器会登记一次性激活任务。请完整退出一次；任务会等旧进程彻底结束后再写入设置，然后自动重新打开官方 `/Applications/ChatGPT.app`。
 
 使用 `./scripts/doctor-native.sh` 检查安装结果。
 
@@ -25,7 +25,7 @@ cd codex-context-status
 
 0.1.x 通过 Chromium DevTools Protocol（CDP）插入“Context + 周额度 + 重置时间”文字栏。CDP 参数只能在 Electron 进程启动时加入。后台 LaunchAgent 无法给已经从官方 Dock 图标打开的 ChatGPT 补参数，应用更新器重启 ChatGPT 时也可能不带这个参数。
 
-原生开关保存在 `~/.codex/.codex-global-state.json`，不在 `/Applications/ChatGPT.app` 内。安装器会原子更新主状态文件和 Codex 的恢复副本，并保留一份首次修改前的安全备份：`~/.codex/.codex-global-state.json.codex-context-status.bak`。
+原生开关保存在 `~/.codex/.codex-global-state.json`，不在 `/Applications/ChatGPT.app` 内。ChatGPT 运行时直接改这个文件并不安全，因为旧进程退出时可能把内存里的旧状态重新写回。一次性激活任务会等待应用完全退出，再原子更新主状态文件和 Codex 的恢复副本，并保留安全备份：`~/.codex/.codex-global-state.json.codex-context-status.bak`。
 
 这个方案不会修改或重新签名 ChatGPT 应用。
 

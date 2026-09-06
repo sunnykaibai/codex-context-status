@@ -17,7 +17,7 @@ cd codex-context-status
 ./install.sh
 ```
 
-The installer enables ChatGPT's native `show-context-window-usage` preference and disables the old CDP injector service. If ChatGPT is already open, quit it once and reopen the official `/Applications/ChatGPT.app`.
+The installer enables ChatGPT's native `show-context-window-usage` preference and disables the old CDP injector service. If ChatGPT is already open, the installer arms a one-shot activation task. Quit ChatGPT once; the task writes the setting only after the old process has fully exited, then automatically reopens the official `/Applications/ChatGPT.app`.
 
 Verify the installation with `./scripts/doctor-native.sh`.
 
@@ -27,7 +27,7 @@ The native indicator is part of the composer footer. Hovering it shows the perce
 
 Versions 0.1.x inserted a combined context and weekly-quota bar through Chromium DevTools Protocol (CDP). CDP must be enabled when the Electron process starts. A background LaunchAgent cannot add that flag to an app already opened from the official Dock icon, and the built-in updater can relaunch ChatGPT without it.
 
-The native preference is stored in `~/.codex/.codex-global-state.json`, not inside `/Applications/ChatGPT.app`. The installer updates both the primary state and Codex's recovery copy atomically, and keeps a one-time safety copy at `~/.codex/.codex-global-state.json.codex-context-status.bak`.
+The native preference is stored in `~/.codex/.codex-global-state.json`, not inside `/Applications/ChatGPT.app`. Writing that file while ChatGPT is open is unsafe because the running process can restore its cached state on exit. The one-shot activation therefore waits for a complete exit, updates both the primary state and Codex's recovery copy atomically, and keeps a safety copy at `~/.codex/.codex-global-state.json.codex-context-status.bak`.
 
 No ChatGPT application files are modified or re-signed.
 
