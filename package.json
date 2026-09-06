@@ -1,11 +1,11 @@
 {
   "name": "codex-context-status",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Show live Codex context and usage limits inside the ChatGPT macOS composer.",
+  "description": "Persistently show live Codex context usage inside the ChatGPT macOS composer.",
   "scripts": {
-    "check": "node --check src/injector.mjs",
+    "check": "node --check src/injector.mjs && node --check src/native-setting.mjs",
     "test": "TZ=UTC node --test"
   },
   "engines": {

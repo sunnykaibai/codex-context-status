@@ -9,6 +9,14 @@ service_target="gui/$(id -u)"
 timestamp="$(date '+%Y%m%d-%H%M%S')"
 node_path="$(/usr/bin/plutil -extract ProgramArguments.0 raw -o - "$launch_agent" 2>/dev/null || true)"
 
+native_node="/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
+if [[ ! -x "$native_node" ]]; then
+  native_node="${commands[node]:-}"
+fi
+if [[ -n "$native_node" && -x "$native_node" ]]; then
+  "$native_node" "${0:A:h}/src/native-setting.mjs" disable >/dev/null 2>&1 || true
+fi
+
 if [[ -x "$node_path" && -f "$support_dir/injector.mjs" ]]; then
   "$node_path" "$support_dir/injector.mjs" --remove >/dev/null 2>&1 || true
 fi
@@ -29,4 +37,4 @@ if [[ -e "$restart_launch_agent" ]]; then
 fi
 
 print "Uninstalled Codex Context Status. Removed files were moved to Trash."
-print "Quit ChatGPT and reopen the official app normally to close the debugging port."
+print "Quit ChatGPT and reopen the official app to apply the native setting change and close any debugging port."

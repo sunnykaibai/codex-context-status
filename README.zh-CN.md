@@ -1,36 +1,13 @@
 # Codex Context Status
 
-把当前 Codex 对话的上下文占用和账号额度直接显示在 ChatGPT macOS 输入框工具栏中。
+在 ChatGPT macOS 输入框内持久显示当前 Codex 对话的上下文占用。
 
-```text
-完全访问   上下文 123K / 828K  14.9%  |  周额度 79%  09-04 00:52
-```
-
-状态节点是输入框工具栏真正的 DOM 子节点，不是浮动的 macOS 窗口。输入框高度变化时，状态会随工具栏一起移动。
+0.2 版改用 ChatGPT 自带的 Context 指示器。它由应用按当前对话更新，正常 `Cmd-Q` 退出重开后仍然有效；设置保存在应用包之外，普通的 ChatGPT 自动更新也不会删除它。
 
 > [!IMPORTANT]
-> 这是非官方的实验性 macOS 工具，与 OpenAI 没有关联，也未获得 OpenAI 背书。ChatGPT 和 Codex 是 OpenAI 的商标。
+> 这是非官方 macOS 工具，与 OpenAI 没有关联，也未获得 OpenAI 背书。ChatGPT 和 Codex 是 OpenAI 的商标。
 
-## 显示内容
-
-- `last_token_usage.total_tokens`：当前选中的本地对话所占用的 token 数量
-- `model_context_window`：本次运行实际报告的上下文上限
-- 上下文占用百分比
-- 通过 ChatGPT 已认证的 `/wham/usage` 客户端取得主要额度窗口的剩余百分比和重置时间
-
-工具不会把累计的 `total_token_usage` 错当成当前上下文占用。
-
-## 安装条件
-
-- macOS
-- `/Applications/ChatGPT.app`
-- 本地 Codex 对话会在 `~/.codex/sessions` 下写入事件
-
-安装脚本优先使用 ChatGPT 自带的 Node.js；没有 npm 依赖，也不会自动下载第三方软件。
-
-当前已在 ChatGPT 桌面端 `26.825.31414` 和 `26.901.20858` 上验证。输入框 DOM 属于应用内部实现，后续版本可能改变。
-
-## 安装
+## 原生模式（推荐）
 
 ```zsh
 git clone https://github.com/sunnykaibai/codex-context-status.git
@@ -38,25 +15,29 @@ cd codex-context-status
 ./install.sh
 ```
 
-随后执行：
+安装器会启用 ChatGPT 原生的 `show-context-window-usage` 设置，并停用旧的 CDP 注入服务。如果 ChatGPT 正在运行，请完整退出一次，然后直接打开官方 `/Applications/ChatGPT.app`。
 
-1. 完全退出 ChatGPT。
-2. 打开 `~/Applications/ChatGPT Context Status.app`。
-3. 运行 `./scripts/doctor.sh`。
+使用 `./scripts/doctor-native.sh` 检查安装结果。
 
-ChatGPT 完全退出后，应通过安装生成的启动器重新打开。若本地调试端口已经存在，启动器只会激活当前 ChatGPT。
+原生指示器位于输入框底部工具栏。把鼠标移到图标上，会显示占用百分比和“已用 token / 上下文窗口 token”。组件和数据都由 ChatGPT 自身管理，因此切换对话、恢复对话和 fork 对话时，不需要再扫描本地 rollout 文件。
 
-### ChatGPT 更新后
+## 为什么 0.2 版要更换实现
 
-内置更新程序可能不带本地调试参数直接重启 ChatGPT。若更新后状态消失，运行：
+0.1.x 通过 Chromium DevTools Protocol（CDP）插入“Context + 周额度 + 重置时间”文字栏。CDP 参数只能在 Electron 进程启动时加入。后台 LaunchAgent 无法给已经从官方 Dock 图标打开的 ChatGPT 补参数，应用更新器重启 ChatGPT 时也可能不带这个参数。
 
-```zsh
-./scripts/arm-restart.sh
-```
+原生开关保存在 `~/.codex/.codex-global-state.json`，不在 `/Applications/ChatGPT.app` 内。安装器会原子更新主状态文件和 Codex 的恢复副本，并保留一份首次修改前的安全备份：`~/.codex/.codex-global-state.json.codex-context-status.bak`。
 
-随后完全退出 ChatGPT。一次性恢复任务会等待应用正常退出，再通过安装好的启动器重新打开；它不会主动终止 ChatGPT。
+这个方案不会修改或重新签名 ChatGPT 应用。
 
-`./scripts/doctor.sh` 现在直接检查当前 CDP 和 DOM，不会把历史日志中的成功记录当成当前状态。
+## 旧版 Context + 周额度组合栏
+
+ChatGPT 当前的原生组件只显示上下文占用，没有提供把周额度和重置时间加入输入框的受支持扩展接口。
+
+如果你更喜欢原来的组合文字栏，可以运行 `./install-legacy.sh`，然后完整退出 ChatGPT，并打开 `~/Applications/ChatGPT Context Status.app`。这个模式仍有原来的限制：完整退出或更新器重启后，必须通过特殊启动器启动 ChatGPT 并打开 CDP 端口。
+
+## 安全性
+
+原生模式不会打开调试端口。Legacy 模式会在 `127.0.0.1:17654` 开启 CDP；端口开启时，同一 macOS 用户下的其他进程可以检查或修改 renderer。启用 Legacy 模式前请阅读 [SECURITY.md](SECURITY.md)。
 
 ## 卸载
 
@@ -64,47 +45,12 @@ ChatGPT 完全退出后，应通过安装生成的启动器重新打开。若本
 ./uninstall.sh
 ```
 
-卸载脚本会移除输入框中的状态节点、停止后台服务，并把安装文件移到废纸篓。随后正常重启官方 ChatGPT，即可关闭调试端口。
-
-## 工作机制
-
-1. 启动器让官方 ChatGPT 使用仅绑定 `127.0.0.1:17654` 的 Chromium DevTools Protocol。
-2. 服务从当前输入框 DOM 读取活动 thread ID，并把它映射到对应的本地 rollout 文件；侧边栏选中项只作为回退。切换对话后不需要发送消息。
-3. 用户级 `launchd` 服务从该 rollout 文件读取当前上下文和运行时窗口上限。
-4. 新 fork 可能还没有自己的 `token_count`。在子对话产生 token 记录前，服务读取父 rollout 在 `history_base.end_ordinal_exclusive` 分叉点之前的最后一条 token 快照，不会使用父对话当前继续增长后的数值。
-5. 服务通过 CDP 在运行时发现 ChatGPT 已认证的 API 客户端，每 30 秒请求一次 `/wham/usage`。只有百分比、窗口长度和重置时间会离开渲染进程。
-6. 实时请求暂时失败时，服务回退到 rollout 中最后一条 `rate_limits` 快照。
-7. 服务在权限控件 `[data-composer-navigation-target="permissions"]` 后插入状态节点；React 重绘后会自动恢复。
-
-项目不会修改 `ChatGPT.app`，不会上传会话内容，也不包含从 OpenAI 应用中解包的代码。
-
-## 安全边界
-
-CDP 具有读取和修改渲染页面的能力。同一 macOS 用户下的其他进程也能访问没有认证的本地调试端口。项目把端口限制在回环地址，但不能为 CDP 增加认证。
-
-额度请求复用 ChatGPT 自己的认证客户端，凭据不会返回给后台进程；后台只收到百分比、窗口长度和重置时间。
-
-不要在不可信的共享 macOS 账号中使用。安装前请阅读 [SECURITY.md](SECURITY.md)。
-
-## 已知限制
-
-- 无法读取当前选中 thread 的 DOM 标记时，工具才会回退到最近三个本地日期目录中最后更新的 rollout。
-- 当前 thread 和 fork 父链查找同时覆盖活动 `sessions` 与平铺的 `archived_sessions`。
-- ChatGPT 更新可能改变输入框选择器。运行 `./scripts/doctor.sh`，若出现 `FAIL embedded composer node`，说明当前版本不再兼容。
-- renderer 可能已经被替换，但旧 WebSocket 仍暂时显示为打开。CDP 连接和请求现在都有超时；失去响应的 renderer 会被丢弃并自动重新发现。
-- 当前只显示主要额度窗口。
-- 当前版本只支持 macOS。
-
-## 为什么不做成插件
-
-官方插件 UI 作为 iframe 显示在会话内容旁边，当前没有受支持的接口可以把常驻控件加入宿主输入框。参见 [OpenAI 官方插件 UI 文档](https://developers.openai.com/plugins/build/chatgpt-ui)。
-
-## 开发与验证
+## 开发验证
 
 ```zsh
 npm test
 npm run check
-zsh -n install.sh uninstall.sh scripts/*.sh
+zsh -n install.sh install-legacy.sh uninstall.sh scripts/*.sh
 plutil -lint app/Info.plist launchd/*.plist
 ```
 
