@@ -19,11 +19,7 @@ cd codex-context-status
 ./install.sh
 ```
 
-如果 ChatGPT 正在运行，安装后请完整退出一次。一次性任务会自动用完整状态栏重新打开应用；首次切换期间不要手动抢先打开。
-
-此后，用户级启动守护程序会检查每一个新的 ChatGPT 主进程。如果你从官方 Dock 图标启动，或者更新器重启应用时没有携带 CDP 参数，守护程序会在启动初期自动重开一次，并改用带 Context 状态栏的启动器。它只会向刚发现的主进程发送 `TERM`；如果应用不能正常退出，守护程序不会强制结束进程。
-
-自动重开后，运行 `./scripts/doctor.sh` 检查状态。
+安装器不会结束或自动重启 ChatGPT。如果当前进程已经开启 CDP，状态栏会立即出现。完整退出后，请打开 `~/Applications/ChatGPT Context Status.app`，然后运行 `./scripts/doctor.sh` 检查状态。
 
 ## 显示内容
 
@@ -34,11 +30,11 @@ cd codex-context-status
 
 工具不会把累计的 `total_token_usage` 当成当前上下文长度。
 
-## 为什么退出和更新后仍能恢复
+## 退出和更新的边界
 
-Chromium DevTools Protocol（CDP）只能在 Electron 启动时开启，无法事后附加到已经运行的 ChatGPT 进程。启动器负责加入仅监听本机回环地址的 CDP 参数，守护程序负责纠正官方图标启动和更新器重启时缺少参数的情况。
+Chromium DevTools Protocol（CDP）只能在 Electron 启动时开启，无法事后附加到已经运行的 ChatGPT 进程。专用启动器负责加入仅监听本机回环地址的 CDP 参数。这个项目不会为了替换正常启动的 ChatGPT 而主动结束应用。
 
-工具不会修改或重新签名官方 `/Applications/ChatGPT.app`。未来版本仍可能修改私有的输入框 DOM；`./scripts/doctor.sh` 会把 DOM 不兼容和启动恢复失败分别报告。
+工具不会修改或重新签名官方 `/Applications/ChatGPT.app`。未来版本仍可能修改私有的输入框 DOM，更新器重启时也可能省略 CDP 参数；`./scripts/doctor.sh` 会准确报告这两类故障。
 
 ## 原生紧凑模式
 

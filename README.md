@@ -21,11 +21,7 @@ cd codex-context-status
 ./install.sh
 ```
 
-If ChatGPT is running, quit it once after installation. A one-shot task will reopen the app with the full status bar. Do not reopen it manually during this first transition.
-
-Afterwards, a user-level startup supervisor checks every new ChatGPT main process. Opening the official Dock icon or an updater relaunch without CDP causes one early automatic restart through the context-enabled launcher. The supervisor sends `TERM` only to the newly observed main process and refuses to force-kill it if graceful termination fails.
-
-Run `./scripts/doctor.sh` after the automatic reopen.
+The installer never terminates or automatically relaunches ChatGPT. If the current process already has CDP enabled, the bar appears immediately. After a full quit, open `~/Applications/ChatGPT Context Status.app`, then run `./scripts/doctor.sh`.
 
 ## What it shows
 
@@ -36,11 +32,11 @@ Run `./scripts/doctor.sh` after the automatic reopen.
 
 The utility deliberately does not use cumulative `total_token_usage` as the current context size.
 
-## How it survives restarts and updates
+## Restart and update boundary
 
-Chromium DevTools Protocol (CDP) must be enabled when Electron starts; it cannot be attached to an already running ChatGPT process. The launcher supplies the loopback-only CDP arguments, while the supervisor corrects starts from the official icon and updater relaunches that omit them.
+Chromium DevTools Protocol (CDP) must be enabled when Electron starts; it cannot be attached to an already running ChatGPT process. The dedicated launcher supplies the loopback-only CDP arguments. This project deliberately does not terminate a normally started ChatGPT process to replace it.
 
-The official `/Applications/ChatGPT.app` is never modified or re-signed. A future ChatGPT release can still change its private composer DOM; `./scripts/doctor.sh` reports that separately from startup recovery.
+The official `/Applications/ChatGPT.app` is never modified or re-signed. A future ChatGPT release can still change its private composer DOM, and an updater relaunch can omit the CDP argument. In either case, `./scripts/doctor.sh` reports the exact failure.
 
 ## Compact native alternative
 

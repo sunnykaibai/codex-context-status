@@ -10,7 +10,7 @@ The installer preserves a one-time copy of the pre-install state at `~/.codex/.c
 
 The default installer starts ChatGPT with Chromium DevTools Protocol on `127.0.0.1:17654`. CDP has no authentication and can inspect or modify renderer content. Any process running as the same macOS user may be able to connect while ChatGPT is running.
 
-The startup supervisor checks newly observed ChatGPT processes. When a process starts without the expected CDP endpoint, the supervisor sends `TERM`, waits for graceful exit, and reopens the local launcher. It refuses to force-kill a process that does not exit. This can produce one visible restart after an official-icon launch or app update.
+The installer does not terminate or automatically relaunch ChatGPT. Users explicitly choose the dedicated launcher after a full quit.
 
 The launcher explicitly binds to loopback. Do not change the debugging address to `0.0.0.0` or expose the port through port forwarding, containers, SSH tunnels, or network proxies.
 
@@ -29,7 +29,6 @@ Install only from a source tree you have reviewed. The full-bar mode creates:
 - `~/Applications/ChatGPT Context Status.app`
 - `~/Library/Application Support/CodexContextStatus/`
 - `~/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.injector.plist`
-- `~/Library/LaunchAgents/io.github.sunnykaibai.codex-context-status.supervisor.plist`
 - `~/Library/Logs/CodexContextStatus.log`
 
 The official `/Applications/ChatGPT.app` is not modified or re-signed.
